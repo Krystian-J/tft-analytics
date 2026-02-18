@@ -1,0 +1,145 @@
+version: "3.9"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # INFRASTRUCTURE
+  # ---------------------------------------------------------------------------
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: tft_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tft_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.2
+    container_name: tft_clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface (used by clickhouse-connect)
+      - "9000:9000"   # Native interface
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # CRAWLER
+  # ---------------------------------------------------------------------------
+
+  crawler:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_crawler
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./crawler:/app/crawler
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  # Celery Beat — scheduler that monitors queue and triggers league fetches
+  celery_beat:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_celery_beat
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crawler.main beat --loglevel=info
+    volumes:
+      - ./crawler:/app/crawler
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  # Flower — Celery monitoring UI
+  flower:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_flower
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crawler.main flower --port=5555
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./crawler:/app/crawler
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # BACKEND
+  # ---------------------------------------------------------------------------
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tft_backend
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+# ---------------------------------------------------------------------------
+# VOLUMES — persistent data storage
+# ---------------------------------------------------------------------------
+
+volumes:
+  redis_data:
+  postgres_data:
+  clickhouse_data:

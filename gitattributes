@@ -1,0 +1,50 @@
+# =============================================================================
+# DEFAULT BEHAVIOUR
+# Enforce LF line endings for all files unless overridden below
+# =============================================================================
+* text=auto eol=lf
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+*.py text eol=lf
+*.pyi text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.toml text eol=lf
+
+# =============================================================================
+# WEB / FRONTEND
+# =============================================================================
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+
+# =============================================================================
+# CONFIG & DOCS
+# =============================================================================
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.env text eol=lf
+*.txt text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# =============================================================================
+# BINARY FILES — no line ending conversion
+# =============================================================================
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary

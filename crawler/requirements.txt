@@ -1,0 +1,23 @@
+# Task queue
+celery[redis]==5.3.6
+
+# Message broker / cache client
+redis==5.0.1
+
+# HTTP client
+httpx==0.27.0
+
+# Data validation and parsing
+pydantic==2.6.0
+pydantic-settings==2.2.1
+
+# PostgreSQL
+sqlalchemy==2.0.27
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# ClickHouse
+clickhouse-connect==0.7.0
+
+# Logging
+structlog==24.1.0
