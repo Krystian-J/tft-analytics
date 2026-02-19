@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     RATE_LIMIT_BUFFER: int = 5
     CRAWLER_COOLDOWN_MINUTES: int = 30
+    MIN_PLAYERS_THRESHOLD: int = 300
+    SEED_PUUIDS: list[str] = []
 
     model_config = SettingsConfigDict(
         env_file=".env",

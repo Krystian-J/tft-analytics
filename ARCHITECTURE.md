@@ -83,6 +83,26 @@ The pipeline is self-regulating — it does not run on a fixed timer. Instead:
 - A cooldown is enforced (minimum time between league fetches) to prevent tight loops when all players are already up to date
 - Celery Beat also runs a lightweight patch detection check independently, triggering a ClickHouse partition drop when a new patch is detected
 
+#### Season Start Corner Case
+
+At the beginning of a new season, Challenger, Grandmaster and Master leagues are empty until players climb the ladder. The crawler uses a cascading seeder strategy to handle this:
+
+```
+fetch_league(CHALLENGER + GRANDMASTER + MASTER)
+    → count total unique puuids collected
+    → if total < MIN_PLAYERS_THRESHOLD (default: 300):
+        fetch_league(DIAMOND I)
+    → if still < MIN_PLAYERS_THRESHOLD:
+        fetch_league(DIAMOND II)
+    → if still < MIN_PLAYERS_THRESHOLD:
+        fetch_league(DIAMOND III)
+    → ... continue down ladder until threshold is met
+```
+
+Additionally a small hardcoded list of known top player puuids is kept in config as a fallback seed. These are injected directly into `queue:match_list` regardless of league endpoint results, ensuring the crawler always has something to work with even on day one of a new season.
+
+`MIN_PLAYERS_THRESHOLD` is configurable via `.env`. This logic lives entirely in `crawler/services/league_seeder.py`.
+
 ### 3.2 Step-by-Step Event Flow
 
 ```
@@ -248,6 +268,7 @@ tft-analytics/
 │   │   ├── rate_limiter.py          # pause_until Redis logic
 │   │   ├── deduplication.py         # fetched_match_ids Redis set logic
 │   │   ├── match_parser.py          # Pydantic models, raw JSON → flat rows explosion
+│   │   ├── league_seeder.py         # Cascading league fetch logic, season start handling
 │   │   └── patch_detector.py        # Patch change detection logic
 │   │
 │   └── db/                          # Database write logic
