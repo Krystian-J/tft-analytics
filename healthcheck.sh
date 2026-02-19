@@ -52,6 +52,15 @@ check "Backend API" \
     "curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health" \
     "200"
 
+# Check if migrations have been applied (only if migrator service is running)
+if docker-compose ps migrator 2>/dev/null | grep -q "migrator"; then
+    check "Database migrations" \
+        "docker-compose exec -T postgres psql -U tft -d tft -c 'SELECT version_num FROM alembic_version;'" \
+        "0001"
+else
+    echo -e "${YELLOW}⚠ Migrations skipped — migrator service not enabled yet${NC}"
+fi
+
 echo "-----------------------------------"
 echo -e "Results: ${GREEN}$PASS passed${NC} / ${RED}$FAIL failed${NC}"
 echo ""

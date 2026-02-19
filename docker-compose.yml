@@ -1,4 +1,4 @@
-version: "3.9"
+version: "3.9" #obsolete but still widely supported, allows using "depends_on" with healthcheck conditions
 
 services:
 
@@ -52,6 +52,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ---------------------------------------------------------------------------
+  # MIGRATOR — uncomment when crawler code is ready
+  # Runs alembic migrations once on startup then exits
+  # ---------------------------------------------------------------------------
+
+  # migrator:
+  #   build:
+  #     context: .
+  #     dockerfile: crawler/Dockerfile
+  #   container_name: tft_migrator
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   command: alembic upgrade head
+  #   restart: "no"
 
   # ---------------------------------------------------------------------------
   # CRAWLER — uncomment when crawler code is ready
