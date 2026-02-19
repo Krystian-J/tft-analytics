@@ -86,3 +86,7 @@ desktop.ini
 # Keep versions folder but ignore any local test databases
 *.db
 *.sqlite
+
+
+
+*.howtostart.txt
