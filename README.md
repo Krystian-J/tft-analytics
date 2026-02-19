@@ -26,6 +26,8 @@ For full architecture details see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Setup & Installation
 
+**0. WIP**
+
 **1. Clone the repository**
 ```bash
 git clone <your-repo-url>

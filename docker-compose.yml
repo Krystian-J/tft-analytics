@@ -54,86 +54,84 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # CRAWLER
+  # CRAWLER — uncomment when crawler code is ready
   # ---------------------------------------------------------------------------
 
-  crawler:
-    build:
-      context: .
-      dockerfile: crawler/Dockerfile
-    container_name: tft_crawler
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-    volumes:
-      - ./crawler:/app/crawler
-      - ./shared:/app/shared
-    restart: unless-stopped
+  # crawler:
+  #   build:
+  #     context: .
+  #     dockerfile: crawler/Dockerfile
+  #   container_name: tft_crawler
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./crawler:/app/crawler
+  #     - ./shared:/app/shared
+  #   restart: unless-stopped
 
-  # Celery Beat — scheduler that monitors queue and triggers league fetches
-  celery_beat:
-    build:
-      context: .
-      dockerfile: crawler/Dockerfile
-    container_name: tft_celery_beat
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    command: celery -A crawler.main beat --loglevel=info
-    volumes:
-      - ./crawler:/app/crawler
-      - ./shared:/app/shared
-    restart: unless-stopped
+  # celery_beat:
+  #   build:
+  #     context: .
+  #     dockerfile: crawler/Dockerfile
+  #   container_name: tft_celery_beat
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   command: celery -A crawler.main beat --loglevel=info
+  #   volumes:
+  #     - ./crawler:/app/crawler
+  #     - ./shared:/app/shared
+  #   restart: unless-stopped
 
-  # Flower — Celery monitoring UI
-  flower:
-    build:
-      context: .
-      dockerfile: crawler/Dockerfile
-    container_name: tft_flower
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    command: celery -A crawler.main flower --port=5555
-    ports:
-      - "5555:5555"
-    volumes:
-      - ./crawler:/app/crawler
-      - ./shared:/app/shared
-    restart: unless-stopped
+  # flower:
+  #   build:
+  #     context: .
+  #     dockerfile: crawler/Dockerfile
+  #   container_name: tft_flower
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   command: celery -A crawler.main flower --port=5555
+  #   ports:
+  #     - "5555:5555"
+  #   volumes:
+  #     - ./crawler:/app/crawler
+  #     - ./shared:/app/shared
+  #   restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # BACKEND
+  # BACKEND — uncomment when backend code is ready
   # ---------------------------------------------------------------------------
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: tft_backend
-    env_file:
-      - .env
-    ports:
-      - "8000:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app/backend
-      - ./shared:/app/shared
-    restart: unless-stopped
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: backend/Dockerfile
+  #   container_name: tft_backend
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./backend:/app/backend
+  #     - ./shared:/app/shared
+  #   restart: unless-stopped
 
 # ---------------------------------------------------------------------------
 # VOLUMES — persistent data storage
