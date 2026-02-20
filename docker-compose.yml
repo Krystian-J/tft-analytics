@@ -1,4 +1,4 @@
-version: "3.9" #obsolete but still widely supported, allows using "depends_on" with healthcheck conditions
+version: "3.9"
 
 services:
 
@@ -47,6 +47,7 @@ services:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse_schema.sql:/docker-entrypoint-initdb.d/clickhouse_schema.sql
     healthcheck:
       test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 10s

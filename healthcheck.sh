@@ -44,6 +44,10 @@ check "ClickHouse" \
     "docker-compose exec -T clickhouse clickhouse-client --query 'SELECT 1'" \
     "1"
 
+check "ClickHouse schema" \
+    "docker-compose exec -T clickhouse clickhouse-client --query 'EXISTS TABLE tft.unit_stats'" \
+    "1"
+
 check "Flower UI" \
     "curl -s -o /dev/null -w '%{http_code}' http://localhost:5555" \
     "200"
