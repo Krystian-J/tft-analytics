@@ -29,14 +29,17 @@ class LeagueEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     puuid: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    summoner_id: Mapped[str] = mapped_column(String, nullable=False)
     tier: Mapped[str] = mapped_column(String, nullable=False)        # CHALLENGER, GRANDMASTER, MASTER, DIAMOND etc.
     rank: Mapped[str] = mapped_column(String, nullable=True)         # I, II, III, IV (null for Challenger/GM)
     league_points: Mapped[int] = mapped_column(Integer, nullable=False)
     wins: Mapped[int] = mapped_column(Integer, nullable=False)
     losses: Mapped[int] = mapped_column(Integer, nullable=False)
+    veteran: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    inactive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fresh_blood: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    hot_streak: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
-    raw_response: Mapped[dict] = mapped_column(JSONB, nullable=False) # full raw entry from league response
+    raw_response: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
 class PlayerCrawl(Base):
