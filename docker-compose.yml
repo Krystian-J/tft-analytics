@@ -41,8 +41,8 @@ services:
     image: clickhouse/clickhouse-server:24.2
     container_name: tft_clickhouse
     ports:
-      - "8123:8123"   # HTTP interface (used by clickhouse-connect)
-      - "9000:9000"   # Native interface
+      - "8123:8123"
+      - "9000:9000"
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
     volumes:
@@ -55,79 +55,82 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # MIGRATOR — uncomment when crawler code is ready
-  # Runs alembic migrations once on startup then exits
+  # MIGRATOR — runs alembic migrations once on startup then exits
   # ---------------------------------------------------------------------------
 
-  # migrator:
-  #   build:
-  #     context: .
-  #     dockerfile: crawler/Dockerfile
-  #   container_name: tft_migrator
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   command: alembic upgrade head
-  #   restart: "no"
+  migrator:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_migrator
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    restart: "no"
 
   # ---------------------------------------------------------------------------
-  # CRAWLER — uncomment when crawler code is ready
+  # CRAWLER
   # ---------------------------------------------------------------------------
 
-  # crawler:
-  #   build:
-  #     context: .
-  #     dockerfile: crawler/Dockerfile
-  #   container_name: tft_crawler
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #     postgres:
-  #       condition: service_healthy
-  #     clickhouse:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./crawler:/app/crawler
-  #     - ./shared:/app/shared
-  #   restart: unless-stopped
+  crawler:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_crawler
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    volumes:
+      - ./crawler:/app/crawler
+      - ./shared:/app/shared
+    restart: unless-stopped
 
-  # celery_beat:
-  #   build:
-  #     context: .
-  #     dockerfile: crawler/Dockerfile
-  #   container_name: tft_celery_beat
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   command: celery -A crawler.main beat --loglevel=info
-  #   volumes:
-  #     - ./crawler:/app/crawler
-  #     - ./shared:/app/shared
-  #   restart: unless-stopped
+  celery_beat:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_celery_beat
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    command: celery -A crawler.main beat --loglevel=info
+    volumes:
+      - ./crawler:/app/crawler
+      - ./shared:/app/shared
+    restart: unless-stopped
 
-  # flower:
-  #   build:
-  #     context: .
-  #     dockerfile: crawler/Dockerfile
-  #   container_name: tft_flower
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   command: celery -A crawler.main flower --port=5555
-  #   ports:
-  #     - "5555:5555"
-  #   volumes:
-  #     - ./crawler:/app/crawler
-  #     - ./shared:/app/shared
-  #   restart: unless-stopped
+  flower:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    container_name: tft_flower
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crawler.main flower --port=5555
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./crawler:/app/crawler
+      - ./shared:/app/shared
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # BACKEND — uncomment when backend code is ready
