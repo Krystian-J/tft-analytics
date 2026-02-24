@@ -2,7 +2,7 @@
 -- TFT Analytics — ClickHouse Schema
 -- =============================================================================
 -- Run this script once to set up the ClickHouse database and tables.
--- Unlike PostgreSQL/Alembic, ClickHouse schema is managed via this SQL script.
+-- Unlike PostgreSQAL/AlAmbic, ClickHouse schema is managed via this SQL script.
 --
 -- To apply:
 --   docker-compose exec clickhouse clickhouse-client --multiquery < clickhouse_schema.sql

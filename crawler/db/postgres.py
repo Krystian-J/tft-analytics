@@ -19,8 +19,8 @@ logger = get_logger(__name__)
 engine = create_engine(
     settings.POSTGRES_URL,
     pool_pre_ping=True,   # checks connection health before using it from pool
-    pool_size=5,
-    max_overflow=10,
+    pool_size=2,
+    max_overflow=3,
 )
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

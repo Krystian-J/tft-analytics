@@ -1,5 +1,6 @@
 from kombu import Queue
 from shared.config import settings
+from celery.schedules import crontab
 
 # ---------------------------------------------------------------------------
 # BROKER & BACKEND
@@ -74,3 +75,19 @@ result_expires = 3600  # seconds
 # ---------------------------------------------------------------------------
 timezone = "UTC"
 enable_utc = True
+
+# ---------------------------------------------------------------------------
+# BEAT SCHEDULE
+# Celery Beat periodically checks if the match_list queue is empty
+# and triggers a new league fetch cycle if so
+# ---------------------------------------------------------------------------
+beat_schedule = {
+    "check-and-trigger-league-fetch": {
+        "task": "crawler.tasks.league.fetch_league",
+        "schedule": settings.CRAWLER_COOLDOWN_MINUTES * 60,  # seconds
+    },
+}
+
+
+beat_max_loop_interval = 10  # check schedule every 10 seconds
+
