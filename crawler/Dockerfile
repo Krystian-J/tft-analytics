@@ -26,6 +26,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy crawler source code
 COPY crawler/ ./crawler/
 
+# Copy alembic
+COPY alembic.ini /app/alembic.ini
+COPY migrations /app/migrations
+
 # Default command — starts Celery worker
 # Queues are explicitly listed so this worker only processes crawler tasks
 CMD ["celery", "-A", "crawler.main", "worker", "--loglevel=info", "-Q", "league,match_list,match_detail,save"]

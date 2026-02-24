@@ -1,10 +1,12 @@
+import sys
+sys.path.insert(0, "/app")
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # Import your SQLAlchemy models here so Alembic can detect schema changes
-# from crawler.db.models import Base  # uncomment once models are defined
+from crawler.db.models import Base  # uncomment once models are defined
 
 # Import shared config to get database URL from .env
 from shared.config import settings
@@ -22,7 +24,7 @@ if config.config_file_name is not None:
 
 # Set target metadata for autogenerate support
 # Replace with Base.metadata once models are defined
-target_metadata = None
+target_metadata = Base.metadata 
 
 
 def run_migrations_offline() -> None:
