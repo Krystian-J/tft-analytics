@@ -1,11 +1,12 @@
 from kombu import Queue
+from shared.config import settings
 
 # ---------------------------------------------------------------------------
 # BROKER & BACKEND
 # Redis as both the message broker and result backend
 # ---------------------------------------------------------------------------
-broker_url = "${REDIS_URL}"
-result_backend = "${REDIS_URL}"
+broker_url = settings.REDIS_URL
+result_backend = settings.REDIS_URL
 
 # ---------------------------------------------------------------------------
 # QUEUES
