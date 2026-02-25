@@ -24,6 +24,7 @@ This system crawls TFT match data from the Riot Games API, stores it in a dual-d
 | Pipeline monitoring | Flower | Celery queue and worker visibility |
 | Logging | structlog | Structured JSON logs, traceable by match ID |
 | Local orchestration | Docker Compose | Single command brings up all services |
+| Testing | pytest + fakeredis | Unit tests for services, no real infra needed |
 
 ---
 
@@ -34,7 +35,7 @@ This system crawls TFT match data from the Riot Games API, stores it in a dual-d
 │                        CRAWLER PIPELINE                         │
 │                                                                 │
 │  ┌──────────────┐                                               │
-│  │ Celery Beat  │  ← triggers league fetch when queues empty   │
+│  │ Celery Beat  │  ← triggers league fetch on schedule         │
 │  └──────┬───────┘                                               │
 │         │                                                       │
 │         ▼                                                       │
@@ -76,12 +77,7 @@ This system crawls TFT match data from the Riot Games API, stores it in a dual-d
 
 ### 3.1 Pipeline Trigger
 
-The pipeline is self-regulating — it does not run on a fixed timer. Instead:
-
-- Celery Beat monitors `queue:match_list`
-- When the queue drains to empty, it triggers a new league fetch cycle
-- A cooldown is enforced (minimum time between league fetches) to prevent tight loops when all players are already up to date
-- Celery Beat also runs a lightweight patch detection check independently, triggering a ClickHouse partition drop when a new patch is detected
+Celery Beat triggers a new league fetch cycle every `CRAWLER_COOLDOWN_MINUTES` (default: 30 minutes). Deduplication ensures players already crawled this cycle are skipped automatically.
 
 #### Season Start Corner Case
 
@@ -93,9 +89,11 @@ fetch_league(CHALLENGER + GRANDMASTER + MASTER)
     → if total < MIN_PLAYERS_THRESHOLD (default: 300):
         fetch_league(DIAMOND I)
     → if still < MIN_PLAYERS_THRESHOLD:
-        fetch_league(DIAMOND II)
+        fetch_league(EMERALD I)
     → if still < MIN_PLAYERS_THRESHOLD:
-        fetch_league(DIAMOND III)
+        fetch_league(PLATINUM I)
+    → if still < MIN_PLAYERS_THRESHOLD:
+        fetch_league(GOLD I)
     → ... continue down ladder until threshold is met
 ```
 
@@ -107,7 +105,8 @@ Additionally a small hardcoded list of known top player puuids is kept in config
 
 ```
 [1] LEAGUE FETCH
-    Celery Beat → fetch_league task (x3: Challenger, Grandmaster, Master)
+    Celery Beat → fetch_league task
+        → cascading tier fetch via league_seeder.collect_puuids_for_cycle()
         → GET /tft/league/v1/{tier}
         → read rate limit headers → update pause_until if needed
         → for each puuid in response:
@@ -132,13 +131,14 @@ Additionally a small hardcoded list of known top player puuids is kept in config
         → read rate limit headers → update pause_until if needed
         → on 429: read Retry-After header, requeue task with that delay
         → on success:
-            atomically add match_id to set:fetched_match_ids
             push save_match(raw_json) → queue:save
 
 [4] SAVE
     save_match(raw_json)
         → validate and parse with Pydantic
         → write raw JSON to PostgreSQL (jsonb column)
+        → detect patch change → drop old ClickHouse partitions if needed
+        → look up player ranks from PostgreSQL for LP denormalization
         → explode nested structure into flat unit-level rows
         → batch insert flat rows into ClickHouse
 ```
@@ -147,7 +147,7 @@ Additionally a small hardcoded list of known top player puuids is kept in config
 
 A single match appears in up to 8 different players' match histories. Without deduplication, each match would be fetched 8 times. The atomic Redis set check at step [2] prevents this — the first worker to see a match ID claims it; all others discard it.
 
-The atomic check uses a Redis `SETNX`-equivalent operation so two workers processing different players simultaneously cannot both decide to fetch the same match.
+The atomic check uses a Lua script so two workers processing different players simultaneously cannot both decide to fetch the same match.
 
 ---
 
@@ -169,13 +169,11 @@ Before every request:
 
 After every response:
   → parse X-App-Rate-Limit-Count and X-Method-Rate-Limit-Count
-  → if app_calls_remaining < 5:
+  → if app_calls_remaining < RATE_LIMIT_BUFFER (default: 5):
       SET pause_until = now + window_reset_seconds (atomic Redis write)
 ```
 
 The threshold of 5 remaining calls absorbs in-flight requests that were already dispatched before the flag was set. The `pause_until` key carries a TTL equal to the rate limit window so it never blocks workers after a restart.
-
-Worker pool sizes per queue are calibrated to each endpoint's method rate limit — the match detail endpoint is most generous and receives the most workers.
 
 ---
 
@@ -212,9 +210,9 @@ Purpose: source of truth, replay capability if ClickHouse schema changes or data
 
 Stores one row per unit per participant per game — fully flat and denormalized. A single 8-player game produces approximately 72 rows.
 
-**Partitioning:** partitioned by `patch`. Old partitions are dropped entirely at patch change — no row-level deletes needed.
+**Partitioning:** partitioned by `game_version` (patch). Old partitions are dropped entirely at patch change — no row-level deletes needed.
 
-**Sort key:** `ORDER BY (lp, unit_name)` — optimized for the most common query pattern of filtering by player strength and champion.
+**Sort key:** `ORDER BY (character_id, lp)` — optimized for the most common query pattern of filtering by champion then by player strength.
 
 **Projections:** additional projections defined for item-first query patterns (e.g. "best champions for item X") where the base sort key is suboptimal.
 
@@ -237,7 +235,34 @@ User sets filters in React UI (champion, item, LP threshold, tier)
 
 ---
 
-## 8. Folder / File Structure
+## 8. Testing
+
+Tests live in `tests/` at the project root. They run locally in a virtual environment — not inside Docker.
+
+### Running Tests
+
+```bash
+# From project root with venv activated
+pytest tests/ -v
+```
+
+### What Is Tested
+
+| Module | Approach |
+|---|---|
+| `match_parser.py` | Unit tests with real match JSON fixture — no mocking needed |
+| `rate_limiter.py` | Unit tests with `fakeredis` — no real Redis needed |
+| `deduplication.py` | Unit tests with `fakeredis` — no real Redis needed |
+
+### What Is Not Tested
+
+- Celery tasks — they are thin wrappers around services; service tests provide sufficient coverage
+- Database write functions — these require real PostgreSQL/ClickHouse; covered by integration testing when running locally
+- Riot API responses — mocked via `pytest-mock` where needed
+
+---
+
+## 9. Folder / File Structure
 
 ```
 tft-analytics/
@@ -248,6 +273,15 @@ tft-analytics/
 ├── .gitattributes                   # Consistent line endings across Windows and Linux
 ├── README.md
 ├── ARCHITECTURE.md
+├── pytest.ini                       # pytest configuration
+│
+├── tests/                           # All tests live here — run locally, not in Docker
+│   ├── __init__.py
+│   ├── fixtures/
+│   │   └── match_response.json      # Real Riot API match response for testing
+│   ├── test_match_parser.py         # Tests for explosion logic and version parsing
+│   ├── test_rate_limiter.py         # Tests for pause_until logic and header parsing
+│   └── test_deduplication.py        # Tests for atomic check-and-mark logic
 │
 ├── crawler/                         # Standalone crawler service
 │   ├── Dockerfile
@@ -324,15 +358,12 @@ tft-analytics/
 
 ---
 
-## 9. Design Rules
+## 10. Design Rules
 
 These rules govern the codebase structure and must be followed consistently:
 
 **No direct DB calls inside tasks.**
 Celery tasks in `crawler/tasks/` are thin orchestrators only. All database reads and writes go through `crawler/db/`. This keeps tasks testable and decoupled from storage concerns.
-
-**No business logic inside tasks or routers.**
-Tasks call services. Routers call services. Business logic lives exclusively in `services/` directories. A service function should be callable and testable without Celery or FastAPI running.
 
 **No business logic inside tasks or routers.**
 Tasks call services. Routers call services. Business logic lives exclusively in `services/` directories. A service function should be callable and testable without Celery or FastAPI running.
@@ -357,3 +388,6 @@ No scheduled aggregation jobs. ClickHouse is queried live; Redis caches results 
 
 **Secrets never in code.**
 All credentials, API keys, and environment-specific config live in `.env` and are accessed exclusively through `shared/config.py` using pydantic-settings. The `.env` file is never committed to version control.
+
+**Tests run locally, not in Docker.**
+Tests use `fakeredis` and fixture JSON files to run without any real infrastructure. The Docker setup is for production only.

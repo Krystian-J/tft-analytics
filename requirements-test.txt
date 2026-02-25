@@ -1,0 +1,12 @@
+# Shared
+pydantic
+pydantic-settings
+structlog==24.1.0
+
+# Redis (needed by rate_limiter and deduplication)
+redis==5.0.1
+
+# Testing
+pytest==8.0.2
+pytest-mock==3.12.0
+fakeredis==2.21.1

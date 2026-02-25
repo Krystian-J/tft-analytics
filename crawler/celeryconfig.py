@@ -89,5 +89,4 @@ beat_schedule = {
 }
 
 
-beat_max_loop_interval = 10  # check schedule every 10 seconds
 
