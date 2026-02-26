@@ -3,38 +3,54 @@ from shared.logging import get_logger
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Tier ordering for >= filtering
+# Tiers where LP filtering is meaningful
 # ---------------------------------------------------------------------------
 
-TIER_ORDER = [
+LP_ELIGIBLE_TIERS = {"MASTER", "GRANDMASTER", "CHALLENGER"}
+
+ALL_TIERS = [
     "IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM",
     "EMERALD", "DIAMOND", "MASTER", "GRANDMASTER", "CHALLENGER",
 ]
 
 
-def _tier_filter_clause(min_tier: str | None) -> str:
+def _tier_filter_clause(tiers: list[str] | None) -> str:
     """
     Returns a SQL WHERE clause fragment for tier filtering.
-    e.g. min_tier=DIAMOND → tier IN ('DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER')
+    e.g. tiers=["CHALLENGER", "GRANDMASTER"] → tier IN ('CHALLENGER', 'GRANDMASTER')
     """
-    if not min_tier:
+    if not tiers:
         return ""
-    min_tier = min_tier.upper()
-    if min_tier not in TIER_ORDER:
+    valid = [t.upper() for t in tiers if t.upper() in ALL_TIERS]
+    if not valid:
         return ""
-    valid_tiers = TIER_ORDER[TIER_ORDER.index(min_tier):]
-    tiers_str = ", ".join(f"'{t}'" for t in valid_tiers)
+    tiers_str = ", ".join(f"'{t}'" for t in valid)
     return f"AND tier IN ({tiers_str})"
+
+
+def _lp_filter_clause(min_lp: int | None, tiers: list[str] | None) -> str:
+    """
+    LP filter is only applied when filtering Master+ tiers exclusively.
+    If any non-Master tier is selected, LP filter is ignored.
+    """
+    if min_lp is None:
+        return ""
+    if not tiers:
+        return ""
+    # Only apply LP filter if all selected tiers are LP-eligible
+    selected = {t.upper() for t in tiers}
+    if not selected.issubset(LP_ELIGIBLE_TIERS):
+        return ""
+    return f"AND lp >= {int(min_lp)}"
 
 
 def build_champion_stats_query(
     patch: str | None,
-    min_tier: str | None,
+    tiers: list[str] | None,
     min_lp: int | None,
 ) -> tuple[str, dict]:
     """
     Builds a ClickHouse query that returns per-champion stats.
-
     Returns (query_string, params_dict).
     """
     conditions = ["1=1"]
@@ -43,12 +59,10 @@ def build_champion_stats_query(
     if patch:
         conditions.append("game_version = {patch:String}")
         params["patch"] = patch
-    if min_lp is not None:
-        conditions.append("lp >= {min_lp:UInt16}")
-        params["min_lp"] = min_lp
 
-    tier_clause = _tier_filter_clause(min_tier)
-    where = " AND ".join(conditions) + f" {tier_clause}"
+    tier_clause = _tier_filter_clause(tiers)
+    lp_clause = _lp_filter_clause(min_lp, tiers)
+    where = " AND ".join(conditions) + f" {tier_clause} {lp_clause}"
 
     query = f"""
         SELECT
@@ -70,13 +84,12 @@ def build_champion_stats_query(
 def build_item_combos_query(
     champion: str,
     patch: str | None,
-    min_tier: str | None,
+    tiers: list[str] | None,
     min_lp: int | None,
     limit: int = 10,
 ) -> tuple[str, dict]:
     """
     Builds a ClickHouse query that returns top item combinations for a champion.
-
     Returns (query_string, params_dict).
     """
     conditions = ["character_id = {champion:String}"]
@@ -85,12 +98,10 @@ def build_item_combos_query(
     if patch:
         conditions.append("game_version = {patch:String}")
         params["patch"] = patch
-    if min_lp is not None:
-        conditions.append("lp >= {min_lp:UInt16}")
-        params["min_lp"] = min_lp
 
-    tier_clause = _tier_filter_clause(min_tier)
-    where = " AND ".join(conditions) + f" {tier_clause}"
+    tier_clause = _tier_filter_clause(tiers)
+    lp_clause = _lp_filter_clause(min_lp, tiers)
+    where = " AND ".join(conditions) + f" {tier_clause} {lp_clause}"
 
     query = f"""
         SELECT

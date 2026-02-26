@@ -9,6 +9,7 @@ from backend.services.query_builder import (
     build_available_patches_query,
 )
 from shared.logging import get_logger
+import backend.main as app_state
 
 logger = get_logger(__name__)
 
@@ -61,20 +62,23 @@ def get_patches():
 
 @router.get("/champions", response_model=list[ChampionStats])
 def get_champion_stats(
-    patch: str | None = Query(None, description="Game version e.g. 16.4"),
-    min_tier: str | None = Query(None, description="Minimum tier e.g. DIAMOND"),
-    min_lp: int | None = Query(None, description="Minimum LP e.g. 200"),
+    patch: str | None = Query(None, description="Game version e.g. 16.4. Defaults to current patch."),
+    tiers: list[str] | None = Query(None, description="Filter by tiers e.g. CHALLENGER,GRANDMASTER"),
+    min_lp: int | None = Query(None, description="Minimum LP — only applied when filtering Master+ tiers"),
 ):
     """
     Returns stats for all champions matching the given filters.
     Results are ordered by average placement ascending (best first).
+    Patch defaults to the current patch if not specified.
     """
-    params = {"patch": patch, "min_tier": min_tier, "min_lp": min_lp}
+    effective_patch = patch or app_state.current_patch
+    params = {"patch": effective_patch, "tiers": tiers, "min_lp": min_lp}
+
     cached = get_cached("champions", params)
     if cached is not None:
         return cached
 
-    query, query_params = build_champion_stats_query(patch, min_tier, min_lp)
+    query, query_params = build_champion_stats_query(effective_patch, tiers, min_lp)
     try:
         results = execute_query(query, query_params)
     except Exception as e:
@@ -89,17 +93,19 @@ def get_champion_stats(
 def get_champion_detail(
     character_id: str,
     patch: str | None = Query(None),
-    min_tier: str | None = Query(None),
+    tiers: list[str] | None = Query(None),
     min_lp: int | None = Query(None),
     item_combos_limit: int = Query(10, ge=1, le=50),
 ):
     """
     Returns stats for a single champion plus their top item combinations.
+    Patch defaults to the current patch if not specified.
     """
+    effective_patch = patch or app_state.current_patch
     params = {
         "character_id": character_id,
-        "patch": patch,
-        "min_tier": min_tier,
+        "patch": effective_patch,
+        "tiers": tiers,
         "min_lp": min_lp,
         "item_combos_limit": item_combos_limit,
     }
@@ -108,7 +114,7 @@ def get_champion_detail(
         return cached
 
     # Fetch overall stats for this champion
-    stats_query, stats_params = build_champion_stats_query(patch, min_tier, min_lp)
+    stats_query, stats_params = build_champion_stats_query(effective_patch, tiers, min_lp)
     stats_query = stats_query.replace(
         "GROUP BY character_id",
         f"AND character_id = '{character_id}'\n        GROUP BY character_id"
@@ -119,7 +125,7 @@ def get_champion_detail(
 
     # Fetch top item combos
     combos_query, combos_params = build_item_combos_query(
-        character_id, patch, min_tier, min_lp, item_combos_limit
+        character_id, effective_patch, tiers, min_lp, item_combos_limit
     )
     combos_results = execute_query(combos_query, combos_params)
 
@@ -136,18 +142,20 @@ def get_champion_detail(
 def get_item_combos(
     champion: str = Query(..., description="Champion character_id e.g. TFT16_Jinx"),
     patch: str | None = Query(None),
-    min_tier: str | None = Query(None),
+    tiers: list[str] | None = Query(None),
     min_lp: int | None = Query(None),
     limit: int = Query(10, ge=1, le=50),
 ):
     """
     Returns the top item combinations for a given champion.
     Results are ordered by average placement ascending (best first).
+    Patch defaults to the current patch if not specified.
     """
+    effective_patch = patch or app_state.current_patch
     params = {
         "champion": champion,
-        "patch": patch,
-        "min_tier": min_tier,
+        "patch": effective_patch,
+        "tiers": tiers,
         "min_lp": min_lp,
         "limit": limit,
     }
@@ -155,7 +163,7 @@ def get_item_combos(
     if cached is not None:
         return cached
 
-    query, query_params = build_item_combos_query(champion, patch, min_tier, min_lp, limit)
+    query, query_params = build_item_combos_query(champion, effective_patch, tiers, min_lp, limit)
     try:
         results = execute_query(query, query_params)
     except Exception as e:
