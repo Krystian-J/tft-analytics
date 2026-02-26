@@ -12,7 +12,7 @@ This system crawls TFT match data from the Riot Games API, stores it in a dual-d
 |---|---|---|
 | Language | Python (backend), JavaScript (frontend) | Ecosystem fit |
 | Task queue | Celery | Distributed task execution, retries, chaining |
-| Message broker | Redis | Task queuing, rate limit state, deduplication |
+| Message broker | Redis | Task queuing, rate limit state, deduplication, query cache |
 | Raw JSON storage | PostgreSQL | Relational source of truth, JSONB support |
 | ORM | SQLAlchemy + Alembic | Pythonic DB access, schema migrations |
 | Analytics database | ClickHouse | Columnar storage, fast aggregations on flat data |
@@ -50,13 +50,14 @@ This system crawls TFT match data from the Riot Games API, stores it in a dual-d
 │  │  set:fetched_match_ids     ← deduplication               │   │
 │  │  set:crawled_puuids_cycle  ← per-cycle dedup (TTL)       │   │
 │  │  key:pause_until           ← shared rate limit signal    │   │
+│  │  cache:*                   ← backend query result cache  │   │
 │  └──────────────────────────────────────────────────────────┘  │
 │         │                                                       │
 │   ┌─────┴──────┬─────────────────┬──────────────────┐          │
 │   ▼            ▼                 ▼                  ▼          │
 │ League      Match List      Match Detail          Save          │
 │ Workers     Workers         Workers               Workers       │
-│ (1-2)       (2-3)           (5-10)                (2-4)         │
+│ (1-2)       (2-3)           (2)                   (2)           │
 └─────────────────────────────────────────────────────────────────┘
                                                     │
                               ┌─────────────────────┴──────────┐
@@ -109,6 +110,7 @@ Additionally a small hardcoded list of known top player puuids is kept in config
         → cascading tier fetch via league_seeder.collect_puuids_for_cycle()
         → GET /tft/league/v1/{tier}
         → read rate limit headers → update pause_until if needed
+        → on 403: set pause_until for 1 hour, raise InvalidKeyError
         → for each puuid in response:
             if puuid not in set:crawled_puuids_cycle (TTL set):
                 push fetch_match_list(puuid) → queue:match_list
@@ -148,6 +150,16 @@ Additionally a small hardcoded list of known top player puuids is kept in config
 A single match appears in up to 8 different players' match histories. Without deduplication, each match would be fetched 8 times. The atomic Redis set check at step [2] prevents this — the first worker to see a match ID claims it; all others discard it.
 
 The atomic check uses a Lua script so two workers processing different players simultaneously cannot both decide to fetch the same match.
+
+### 3.4 Expired API Key Handling
+
+When Riot returns a 403 (expired or invalid key), `riot_client.py` immediately sets `pause_until` in Redis for 1 hour, halting all workers. A clear error is logged:
+
+```
+riot api key invalid or expired — update RIOT_API_KEY in .env and restart the crawler
+```
+
+To recover: update `RIOT_API_KEY` in `.env` and run `docker-compose restart crawler`. The pause is cleared on restart and all queued tasks resume normally.
 
 ---
 
@@ -220,49 +232,98 @@ Stores one row per unit per participant per game — fully flat and denormalized
 
 ---
 
-## 7. Analytics Query Flow
+## 7. Backend API
+
+The FastAPI backend exposes four endpoints, all under `/api`:
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/patches` | All available patches, most recent first |
+| `GET /api/champions` | Champion stats for all champions |
+| `GET /api/champions/{character_id}` | Stats + top item combos for one champion |
+| `GET /api/items` | Item combo stats for a specific champion |
+
+### Query Parameters
+
+All analytics endpoints accept the same filter parameters:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `patch` | string | Game version e.g. `16.4`. Defaults to current patch automatically. |
+| `tiers` | list[string] | One or more tiers e.g. `?tiers=CHALLENGER&tiers=GRANDMASTER` |
+| `min_lp` | integer | Minimum LP — only applied when all selected tiers are Master/GM/Challenger |
+
+### Patch Defaulting
+
+The current patch is determined dynamically by querying ClickHouse for the most recent `game_version` present in `tft.unit_stats`. The result is cached in Redis for 5 minutes so patch transitions are picked up automatically without requiring a restart.
+
+### Caching
+
+All query results are cached in Redis with a 1 hour TTL. Cache keys are derived from a hash of the filter parameters, so different filter combinations have independent cache entries. Cache invalidation happens naturally via TTL expiry.
+
+---
+
+## 8. Analytics Query Flow
 
 ```
-User sets filters in React UI (champion, item, LP threshold, tier)
-    → POST /api/analytics with filter parameters
+User sets filters in React UI (tiers, LP threshold, patch)
+    → GET /api/champions with filter parameters
     → FastAPI hashes filter params → check Redis query cache
         HIT  → return cached result immediately
         MISS → build and execute ClickHouse query
-             → store result in Redis (TTL: 30-60 min)
+             → store result in Redis (TTL: 1 hour)
              → return result
     → React renders tables and Recharts visualizations
 ```
 
 ---
 
-## 8. Testing
+## 9. Testing
 
 Tests live in `tests/` at the project root. They run locally in a virtual environment — not inside Docker.
 
 ### Running Tests
 
-```bash
+```powershell
 # From project root with venv activated
-pytest tests/ -v
+pytest
 ```
 
 ### What Is Tested
 
 | Module | Approach |
 |---|---|
-| `match_parser.py` | Unit tests with real match JSON fixture — no mocking needed |
-| `rate_limiter.py` | Unit tests with `fakeredis` — no real Redis needed |
-| `deduplication.py` | Unit tests with `fakeredis` — no real Redis needed |
+| `crawler/services/match_parser.py` | Unit tests with real match JSON fixture — no mocking needed |
+| `crawler/services/rate_limiter.py` | Unit tests with `fakeredis` — no real Redis needed |
+| `crawler/services/deduplication.py` | Unit tests with `fakeredis` — no real Redis needed |
+| `backend/services/query_builder.py` | Unit tests — pure functions, no infra needed |
 
 ### What Is Not Tested
 
-- Celery tasks — they are thin wrappers around services; service tests provide sufficient coverage
-- Database write functions — these require real PostgreSQL/ClickHouse; covered by integration testing when running locally
+- Celery tasks — thin wrappers around services; service tests provide sufficient coverage
+- Database write/read functions — require real PostgreSQL/ClickHouse
 - Riot API responses — mocked via `pytest-mock` where needed
+
+### Pre-commit Hook
+
+Tests run automatically before every `git commit` via pre-commit hook. A failing test blocks the commit.
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: venv/Scripts/pytest.exe
+        language: system
+        pass_filenames: false
+        always_run: true
+```
 
 ---
 
-## 9. Folder / File Structure
+## 10. Folder / File Structure
 
 ```
 tft-analytics/
@@ -271,9 +332,12 @@ tft-analytics/
 ├── .env                             # Secrets and config — never committed to Git
 ├── .gitignore                       # Excludes .env, __pycache__, node_modules, etc.
 ├── .gitattributes                   # Consistent line endings across Windows and Linux
+├── .pre-commit-config.yaml          # Pre-commit hook — runs pytest before every commit
 ├── README.md
 ├── ARCHITECTURE.md
 ├── pytest.ini                       # pytest configuration
+├── requirements-test.txt            # Local test dependencies (no psycopg2/docker needed)
+├── clickhouse_schema.sql            # ClickHouse schema — applied once via init script
 │
 ├── tests/                           # All tests live here — run locally, not in Docker
 │   ├── __init__.py
@@ -281,13 +345,14 @@ tft-analytics/
 │   │   └── match_response.json      # Real Riot API match response for testing
 │   ├── test_match_parser.py         # Tests for explosion logic and version parsing
 │   ├── test_rate_limiter.py         # Tests for pause_until logic and header parsing
-│   └── test_deduplication.py        # Tests for atomic check-and-mark logic
+│   ├── test_deduplication.py        # Tests for atomic check-and-mark logic
+│   └── test_query_builder.py        # Tests for SQL generation and filter logic
 │
 ├── crawler/                         # Standalone crawler service
 │   ├── Dockerfile
-│   ├── requirements.txt             # celery, redis, httpx, pydantic, sqlalchemy, clickhouse-connect, structlog
-│   ├── celeryconfig.py              # Queue routing, worker concurrency, acks_late
-│   ├── main.py                      # Celery app entrypoint
+│   ├── requirements.txt
+│   ├── celeryconfig.py              # Queue routing, worker concurrency, acks_late, beat schedule
+│   ├── main.py                      # Celery app entrypoint with startup preload
 │   │
 │   ├── tasks/                       # Celery task definitions ONLY — no business logic
 │   │   ├── __init__.py
@@ -298,31 +363,32 @@ tft-analytics/
 │   │
 │   ├── services/                    # Business logic — called by tasks, testable independently
 │   │   ├── __init__.py
-│   │   ├── riot_client.py           # httpx wrapper, rate limit header parsing
+│   │   ├── riot_client.py           # httpx wrapper, rate limit + 403 handling
 │   │   ├── rate_limiter.py          # pause_until Redis logic
 │   │   ├── deduplication.py         # fetched_match_ids Redis set logic
 │   │   ├── match_parser.py          # Pydantic models, raw JSON → flat rows explosion
 │   │   ├── league_seeder.py         # Cascading league fetch logic, season start handling
-│   │   └── patch_detector.py        # Patch change detection logic
+│   │   └── patch_detector.py        # Patch change detection, ClickHouse partition drops
 │   │
 │   └── db/                          # Database write logic
 │       ├── __init__.py
-│       ├── postgres.py              # SQLAlchemy session, raw match insert
+│       ├── postgres.py              # SQLAlchemy session, raw match + rank insert
 │       └── clickhouse.py            # clickhouse-connect, flat row batch insert
 │
 ├── backend/                         # FastAPI service
 │   ├── Dockerfile
-│   ├── requirements.txt             # fastapi, uvicorn, redis, pydantic, clickhouse-connect, structlog
-│   ├── main.py                      # FastAPI app entrypoint
+│   ├── requirements.txt
+│   ├── main.py                      # FastAPI app entrypoint, CORS config
 │   │
 │   ├── routers/                     # Route definitions — no business logic
 │   │   ├── __init__.py
-│   │   └── analytics.py             # /api/analytics endpoints
+│   │   └── analytics.py             # /api/patches, /api/champions, /api/items endpoints
 │   │
 │   ├── services/                    # Business logic
 │   │   ├── __init__.py
 │   │   ├── query_builder.py         # Translates user filters → ClickHouse SQL
-│   │   └── cache.py                 # Redis query result cache
+│   │   ├── cache.py                 # Redis query result cache with configurable TTL
+│   │   └── patch.py                 # Current patch detection with 5-min Redis cache
 │   │
 │   └── db/                          # Database read logic
 │       ├── __init__.py
@@ -330,7 +396,7 @@ tft-analytics/
 │
 ├── shared/                          # Code shared between crawler and backend
 │   ├── __init__.py
-│   ├── requirements.txt             # pydantic-settings, shared dependencies
+│   ├── requirements.txt
 │   ├── config.py                    # pydantic-settings, loads .env
 │   ├── models/                      # Pydantic models shared across services
 │   │   ├── __init__.py
@@ -349,8 +415,8 @@ tft-analytics/
     └── src/
         ├── App.jsx
         ├── components/
-        │   ├── FilterPanel.jsx      # LP threshold, tier, champion, item filters
-        │   ├── StatsTable.jsx       # Tabular results display
+        │   ├── FilterPanel.jsx      # Tier multi-select, LP threshold, patch selector
+        │   ├── StatsTable.jsx       # Champion stats table with sorting
         │   └── StatsChart.jsx       # Recharts visualizations
         └── services/
             └── api.js               # FastAPI client calls
@@ -358,7 +424,7 @@ tft-analytics/
 
 ---
 
-## 10. Design Rules
+## 11. Design Rules
 
 These rules govern the codebase structure and must be followed consistently:
 
@@ -385,6 +451,9 @@ No updates or deletes on individual rows. Patch data expiry is handled exclusive
 
 **Query results are cached, not precalculated.**
 No scheduled aggregation jobs. ClickHouse is queried live; Redis caches results with a TTL. Cache invalidation happens naturally via TTL expiry, not via explicit invalidation logic.
+
+**Current patch is never hardcoded.**
+The backend always determines the current patch dynamically from ClickHouse data. This ensures patch transitions happen automatically without restarts or config changes.
 
 **Secrets never in code.**
 All credentials, API keys, and environment-specific config live in `.env` and are accessed exclusively through `shared/config.py` using pydantic-settings. The `.env` file is never committed to version control.
