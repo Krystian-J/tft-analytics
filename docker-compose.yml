@@ -48,6 +48,10 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse_schema.sql:/docker-entrypoint-initdb.d/clickhouse_schema.sql
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
     healthcheck:
       test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 10s
@@ -92,6 +96,7 @@ services:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
+    command: celery -A crawler.main worker --loglevel=info -c 2
     volumes:
       - ./crawler:/app/crawler
       - ./shared:/app/shared
