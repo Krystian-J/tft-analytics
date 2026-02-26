@@ -9,7 +9,7 @@ from backend.services.query_builder import (
     build_available_patches_query,
 )
 from shared.logging import get_logger
-import backend.main as app_state
+from backend.services.patch import get_current_patch
 
 logger = get_logger(__name__)
 
@@ -71,7 +71,7 @@ def get_champion_stats(
     Results are ordered by average placement ascending (best first).
     Patch defaults to the current patch if not specified.
     """
-    effective_patch = patch or app_state.current_patch
+    effective_patch = patch or get_current_patch()
     params = {"patch": effective_patch, "tiers": tiers, "min_lp": min_lp}
 
     cached = get_cached("champions", params)
@@ -101,7 +101,7 @@ def get_champion_detail(
     Returns stats for a single champion plus their top item combinations.
     Patch defaults to the current patch if not specified.
     """
-    effective_patch = patch or app_state.current_patch
+    effective_patch = patch or get_current_patch()
     params = {
         "character_id": character_id,
         "patch": effective_patch,
@@ -151,7 +151,7 @@ def get_item_combos(
     Results are ordered by average placement ascending (best first).
     Patch defaults to the current patch if not specified.
     """
-    effective_patch = patch or app_state.current_patch
+    effective_patch = patch or get_current_patch()
     params = {
         "champion": champion,
         "patch": effective_patch,
