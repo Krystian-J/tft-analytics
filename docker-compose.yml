@@ -139,27 +139,27 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # BACKEND — uncomment when backend code is ready
+  # BACKEND
   # ---------------------------------------------------------------------------
 
-  # backend:
-  #   build:
-  #     context: .
-  #     dockerfile: backend/Dockerfile
-  #   container_name: tft_backend
-  #   env_file:
-  #     - .env
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #     clickhouse:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./backend:/app/backend
-  #     - ./shared:/app/shared
-  #   restart: unless-stopped
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tft_backend
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./shared:/app/shared
+    restart: unless-stopped
 
 # ---------------------------------------------------------------------------
 # VOLUMES — persistent data storage
