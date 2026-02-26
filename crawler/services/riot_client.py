@@ -2,7 +2,7 @@ import httpx
 
 from shared.config import settings
 from shared.logging import get_logger
-from crawler.services.rate_limiter import check_and_wait, update_rate_limit
+from crawler.services.rate_limiter import check_and_wait, update_rate_limit, set_pause_for_retry
 
 logger = get_logger(__name__)
 
@@ -23,6 +23,10 @@ PLATFORM_BASE_URLS = {
     "asia": "https://kr.api.riotgames.com",
     "sea": "https://sg2.api.riotgames.com",
 }
+
+# How long to pause all workers when a 403 is detected (seconds)
+# Long enough to update the key and restart the crawler
+INVALID_KEY_PAUSE_SECONDS = 3600
 
 
 def _get_headers() -> dict:
@@ -50,6 +54,7 @@ def _make_request(url: str) -> dict:
     - Checks pause_until before firing (rate limit coordination)
     - Parses rate limit headers from response and updates pause_until
     - Raises on 4xx/5xx except handles 429 by raising with retry delay info
+    - Raises InvalidKeyError on 403 and pauses all workers for 1 hour
 
     Returns parsed JSON response as dict.
     """
@@ -71,6 +76,15 @@ def _make_request(url: str) -> dict:
                 retry_after=retry_after,
             )
             raise RateLimitError(retry_after=retry_after)
+
+        if response.status_code == 403:
+            logger.error(
+                "riot api key invalid or expired — pausing all workers for 1 hour, "
+                "update RIOT_API_KEY in .env and restart the crawler",
+                url=url,
+            )
+            set_pause_for_retry(retry_after_seconds=INVALID_KEY_PAUSE_SECONDS)
+            raise InvalidKeyError()
 
         if response.status_code == 404:
             raise NotFoundError(url=url)
@@ -106,7 +120,6 @@ def fetch_league(tier: str) -> dict:
     if tier_lower in ("challenger", "grandmaster", "master"):
         url = f"{base_url}/tft/league/v1/{tier_lower}"
     else:
-        # For Diamond and below, use entries endpoint with division I
         url = f"{base_url}/tft/league/v1/entries/RANKED_TFT/{tier.upper()}/I"
 
     logger.info("fetching league", tier=tier)
@@ -153,3 +166,15 @@ class NotFoundError(Exception):
     def __init__(self, url: str):
         self.url = url
         super().__init__(f"Resource not found: {url}")
+
+
+class InvalidKeyError(Exception):
+    """Raised when Riot API returns 403 — key is expired or invalid.
+    All workers are paused for INVALID_KEY_PAUSE_SECONDS automatically.
+    To recover: update RIOT_API_KEY in .env and restart the crawler.
+    """
+    def __init__(self):
+        super().__init__(
+            "Riot API key invalid or expired. "
+            "Update RIOT_API_KEY in .env and restart the crawler."
+        )
