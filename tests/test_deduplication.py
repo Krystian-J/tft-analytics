@@ -6,7 +6,7 @@ import pytest
 def fake_redis(monkeypatch):
     """Replace the real Redis client with fakeredis for all tests."""
     server = fakeredis.FakeServer()
-    fake_client = fakeredis.FakeRedis(server=server, decode_responses=True, lua_modules=True)
+    fake_client = fakeredis.FakeRedis(server=server, decode_responses=True, lua_modules=[])
     monkeypatch.setattr("crawler.services.deduplication.redis_client", fake_client)
     return fake_client
 
